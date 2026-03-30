@@ -1331,6 +1331,10 @@ async function loadStore() {
       if (draft) memStore._pendingDraft = draft;
     } catch(e) {}
   }
+
+  // Update cloud status indicator as soon as Firebase loads successfully
+  const cs = document.getElementById('cloudStatus');
+  if (cs) { cs.textContent = '☁️ Cloud Synced'; cs.style.color = '#86efac'; }
 }
 
 // persistStore — lightweight, called by legacy code
@@ -1612,7 +1616,20 @@ function showView(v) {
   const btn = document.getElementById('nav-' + v);
   if (btn) btn.classList.add('active');
   currentView = v;
-  if (v === 'weekly') { renderWeeklyView(); }
+  if (v === 'weekly') { 
+    // Reload weekly data from Firebase fresh each time tab is opened
+    waitForFb().then(async () => {
+      const weekly = await fbGetAll('weekly');
+      weekly.forEach(w => {
+        const name = w._recruiter;
+        const wk = w._weekKey;
+        if (!name || !wk) return;
+        if (!memStore.weekly[name]) memStore.weekly[name] = {};
+        memStore.weekly[name][wk] = w;
+      });
+      renderWeeklyView();
+    });
+  }
   if (v === 'ao') { loadAOSettings(); }
   if (v === 'calendar') renderCalendar();
   if (v === 'analytics') renderAnalytics();
@@ -2746,6 +2763,10 @@ function updateWeeklyGoal(field, val) {
   const data = getWeekData(weeklyAnchorMonday);
   data.goals[field] = parseInt(val) || 0;
   saveWeekData(weeklyAnchorMonday, data);
+  // Flash cloud indicator
+  const cs = document.getElementById('cloudStatus');
+  if (cs) { cs.textContent = '☁️ Saving...'; cs.style.color = '#fbbf24';
+    setTimeout(() => { cs.textContent = '☁️ Cloud Synced'; cs.style.color = '#86efac'; }, 2000); }
 }
 
 function updateEveningNote(idx, val) {
