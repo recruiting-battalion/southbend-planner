@@ -1291,10 +1291,12 @@ async function loadStore() {
     const rec = await fbGet('meta', 'recruiters');
     if (rec && rec.list) memStore.recruiters = rec.list;
 
-    // Active session — stored in localStorage (device-local login)
+    // Active session — try localStorage first (fast), then Firebase (cross-device)
     try {
       const act = localStorage.getItem(DRAFT_KEY + '_active');
-      if (act) memStore.active = JSON.parse(act);
+      if (act) {
+        memStore.active = JSON.parse(act);
+      }
     } catch(e) {}
 
     // Entries
@@ -1321,6 +1323,14 @@ async function loadStore() {
     if (colors) memStore.colors = colors;
 
   } catch(e) { console.warn('loadStore error:', e); }
+
+  // Also load draft for the active session if we have one
+  if (memStore.active) {
+    try {
+      const draft = await fbGet('drafts', memStore.active.name.replace(/\s+/g,'_'));
+      if (draft) memStore._pendingDraft = draft;
+    } catch(e) {}
+  }
 }
 
 // persistStore — lightweight, called by legacy code
@@ -1349,11 +1359,16 @@ function addRecruiter(name, role, accountType) {
 function getActive() { return memStore.active || null; }
 function setActive(recruiter) {
   memStore.active = recruiter;
+  // Save to localStorage for fast load
   try { localStorage.setItem(DRAFT_KEY + '_active', JSON.stringify(recruiter)); } catch(e) {}
+  // Also save to Firebase so it persists across devices/browsers
+  waitForFb().then(() => fbSet('meta', 'active_' + (recruiter.name||'').replace(/\s+/g,'_'), { recruiter, savedAt: new Date().toISOString() }));
 }
 function clearActive() {
+  const prev = memStore.active;
   memStore.active = null;
   try { localStorage.removeItem(DRAFT_KEY + '_active'); } catch(e) {}
+  if (prev) waitForFb().then(() => fbSet('meta', 'active_' + (prev.name||'').replace(/\s+/g,'_'), { recruiter: null }));
 }
 
 // Entries
@@ -2381,7 +2396,11 @@ function saveDraft() {
       await fbSet('drafts', active.name.replace(/\s+/g,'_'), draft);
       // Flash indicator
       const ind = document.getElementById('autoSaveIndicator');
-      if (ind) { ind.style.opacity = '1'; setTimeout(() => ind.style.opacity = '0', 2000); }
+      if (ind) { 
+        ind.textContent = '✓ Saved to cloud';
+        ind.style.opacity = '1'; 
+        setTimeout(() => ind.style.opacity = '0', 2500); 
+      }
     } catch(e) { console.warn('Draft save failed:', e); }
   }, 1500);
 }
@@ -2391,7 +2410,9 @@ async function loadDraft() {
   if (!active) return;
   try {
     await waitForFb();
-    const draft = await fbGet('drafts', active.name.replace(/\s+/g,'_'));
+    // Use pre-loaded draft if available, otherwise fetch
+    const draft = memStore._pendingDraft || await fbGet('drafts', active.name.replace(/\s+/g,'_'));
+    memStore._pendingDraft = null; // clear after use
     if (!draft) return;
     // Restore fields
     Object.keys(draft.fields || {}).forEach(id => {
