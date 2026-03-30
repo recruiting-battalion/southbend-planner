@@ -1576,9 +1576,11 @@ function initApp(profile) {
   populateLeaderRecruiters();
   applyRoleUI(profile);
   loadDraft();
+  // Hook saveDraft to ALL form inputs in daily view
   document.querySelectorAll('#view-daily input, #view-daily textarea, #view-daily select').forEach(el => {
     el.addEventListener('input', saveDraft);
     el.addEventListener('change', saveDraft);
+    el.addEventListener('keyup', saveDraft);
   });
   document.getElementById('timeBlocksGrid').addEventListener('input', saveDraft);
   document.getElementById('timeBlocksGrid').addEventListener('change', saveDraft);
@@ -1721,7 +1723,9 @@ function submitPlan() {
   }
   saveEntry(entry);
   clearDraft(); // draft no longer needed — full entry saved
-  showToast('✅ Battle plan submitted and saved to the cloud!', 'success');
+  showToast('✅ Battle plan submitted! Check Calendar and Leader View to confirm.', 'success');
+  // Refresh calendar if visible
+  if (currentView === 'calendar') renderCalendar();
   const savedBlocks = entry.timeBlocks; // capture before clearForm wipes them
   clearForm();
   if (savedBlocks && savedBlocks.length > 0) {
@@ -2384,8 +2388,11 @@ function saveDraft() {
         timeBlocks: collectTimeBlocks(),
         admin: {},
       };
-      document.querySelectorAll('#view-daily input[type="text"], #view-daily input[type="date"], #view-daily input[type="number"], #view-daily textarea').forEach(el => {
-        if (el.id) draft.fields[el.id] = el.value;
+      // Capture ALL input fields — including those without explicit type attribute
+      document.querySelectorAll('#view-daily input, #view-daily textarea, #view-daily select').forEach(el => {
+        if (el.id && el.type !== 'checkbox' && el.type !== 'file' && el.type !== 'submit' && el.type !== 'button') {
+          draft.fields[el.id] = el.value;
+        }
       });
       ADMIN_ITEMS.forEach(a => {
         const cb = document.getElementById(a.id);
@@ -2414,10 +2421,12 @@ async function loadDraft() {
     const draft = memStore._pendingDraft || await fbGet('drafts', active.name.replace(/\s+/g,'_'));
     memStore._pendingDraft = null; // clear after use
     if (!draft) return;
-    // Restore fields
+    // Restore ALL saved fields
     Object.keys(draft.fields || {}).forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.value = draft.fields[id];
+      if (el && el.type !== 'checkbox' && el.type !== 'file') {
+        el.value = draft.fields[id];
+      }
     });
     // Restore time blocks
     if (draft.timeBlocks && draft.timeBlocks.length > 0) {
