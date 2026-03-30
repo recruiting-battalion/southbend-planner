@@ -1114,9 +1114,10 @@ window.dispatchEvent(new Event('fbReady'));
           <label class="form-label">City / Area Name</label>
           <input class="form-input" id="ao_city" placeholder="e.g. South Bend, IN" />
         </div>
-        <button class="submit-btn" style="padding:10px 20px;" onclick="runAOSearch()">🔍 Search My AO</button>
+        <button class="submit-btn" style="padding:10px 20px;opacity:0.5;cursor:not-allowed;" disabled title="Coming soon">🔍 Search My AO — Coming Soon</button>
       </div>
       <div style="margin-top:8px;font-size:12px;color:var(--text2);">Searches for upcoming events, job fairs, school events, and community activities in your area.</div>
+      <div style="margin-top:8px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:8px 12px;font-size:12px;color:#92400e;">⏳ <strong>Live search coming soon.</strong> You can still manually add activities to your Weekly Plan using the section below.</div>
     </div>
 
     <!-- Results Grid -->
@@ -2346,6 +2347,83 @@ document.getElementById('colorModal').addEventListener('click', function(e) {
 });
 
 
+
+
+// ==================== DRAFT AUTO-SAVE (Firebase) ====================
+// Saves unsubmitted daily plan work to Firebase every time a field changes.
+// Survives browser close, device switch, logout — always restores on login.
+
+let draftSaveTimer = null;
+
+function saveDraft() {
+  // Debounce — wait 1.5s after last keystroke before saving
+  clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(async () => {
+    const active = getActive();
+    if (!active) return;
+    try {
+      const draft = {
+        recruiter: active.name,
+        savedAt: new Date().toISOString(),
+        fields: {},
+        timeBlocks: collectTimeBlocks(),
+        admin: {},
+      };
+      document.querySelectorAll('#view-daily input[type="text"], #view-daily input[type="date"], #view-daily input[type="number"], #view-daily textarea').forEach(el => {
+        if (el.id) draft.fields[el.id] = el.value;
+      });
+      ADMIN_ITEMS.forEach(a => {
+        const cb = document.getElementById(a.id);
+        if (cb) draft.admin[a.id] = cb.checked;
+      });
+      // Save to Firebase under this recruiter's draft doc
+      await waitForFb();
+      await fbSet('drafts', active.name.replace(/\s+/g,'_'), draft);
+      // Flash indicator
+      const ind = document.getElementById('autoSaveIndicator');
+      if (ind) { ind.style.opacity = '1'; setTimeout(() => ind.style.opacity = '0', 2000); }
+    } catch(e) { console.warn('Draft save failed:', e); }
+  }, 1500);
+}
+
+async function loadDraft() {
+  const active = getActive();
+  if (!active) return;
+  try {
+    await waitForFb();
+    const draft = await fbGet('drafts', active.name.replace(/\s+/g,'_'));
+    if (!draft) return;
+    // Restore fields
+    Object.keys(draft.fields || {}).forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = draft.fields[id];
+    });
+    // Restore time blocks
+    if (draft.timeBlocks && draft.timeBlocks.length > 0) {
+      populateTimeBlocks(draft.timeBlocks);
+    }
+    // Restore admin checkboxes
+    if (draft.admin) {
+      ADMIN_ITEMS.forEach(a => {
+        const cb = document.getElementById(a.id);
+        if (cb) { cb.checked = draft.admin[a.id] || false; toggleAdmin(a.id); }
+      });
+    }
+    if (draft.savedAt) {
+      const t = new Date(draft.savedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      showToast(`📋 Draft restored from ${t}`, '');
+    }
+  } catch(e) { console.warn('Draft load failed:', e); }
+}
+
+async function clearDraft() {
+  const active = getActive();
+  if (!active) return;
+  try {
+    await waitForFb();
+    await window.__fbDeleteDoc(window.__fbDoc(window.__db, TEAM_PREFIX + '_drafts', active.name.replace(/\s+/g,'_')));
+  } catch(e) {}
+}
 
 // ==================== AO INTEL ====================
 const AO_SETTINGS_KEY = 'ao_settings';
